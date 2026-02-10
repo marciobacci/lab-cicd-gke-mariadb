@@ -1,0 +1,79 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: us-central1
+  _CLUSTER_NAME: lab-gke
+  _REPO: repo-lab
+
+steps:
+  # CI - testes
+  - name: "python:3.12-slim"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        pip install --no-cache-dir -r requirements.txt
+        pytest -q
+
+  # CI - build imagem web
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "-t",
+        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA",
+        "."
+      ]
+
+  # CI - push
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "push",
+        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
+      ]
+
+  # CD - deploy no GKE + secrets
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+
+        gcloud container clusters get-credentials ${_CLUSTER_NAME} --region ${_REGION} --project $PROJECT_ID
+
+        # Namespace e recursos base
+        kubectl apply -f k8s/01-namespace.yaml
+
+        # Lê credenciais do Secret Manager
+        DB_USER="$(gcloud secrets versions access latest --secret=db-user)"
+        DB_PASSWORD="$(gcloud secrets versions access latest --secret=db-password)"
+        DB_NAME="$(gcloud secrets versions access latest --secret=db-name)"
+
+        # (re)cria o Secret no Kubernetes (namespace aplicacao)
+        kubectl -n aplicacao delete secret db-credentials --ignore-not-found
+        kubectl -n aplicacao create secret generic db-credentials \
+          --from-literal=DB_USER="$DB_USER" \
+          --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+          --from-literal=DB_NAME="$DB_NAME"
+
+        # Banco + serviços
+        kubectl apply -f k8s/03-pvc-mariadb.yaml
+        kubectl apply -f k8s/05-svc-mariadb.yaml
+        kubectl apply -f k8s/04-deploy-mariadb.yaml
+
+        # Web + serviço externo
+        kubectl apply -f k8s/07-svc-web.yaml
+        kubectl apply -f k8s/06-deploy-web.yaml
+
+        # Atualiza imagem do deployment web para o commit atual
+        kubectl -n aplicacao set image deployment/web web=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA
+
+        # Aguarda rollouts
+        kubectl -n aplicacao rollout status deployment/mariadb --timeout=300s
+        kubectl -n aplicacao rollout status deployment/web --timeout=300s
+
+images:
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/repo-lab/web:$SHORT_SHA"
