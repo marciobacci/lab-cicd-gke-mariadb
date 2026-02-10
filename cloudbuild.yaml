@@ -76,4 +76,4 @@ steps:
         kubectl -n aplicacao rollout status deployment/web --timeout=300s
 
 images:
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/repo-lab/web:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
