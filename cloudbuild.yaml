@@ -7,7 +7,9 @@ substitutions:
   _REPO: repo-lab
 
 steps:
-  # CI - testes
+  # ======================
+  # CI – Testes automatizados
+  # ======================
   - name: "python:3.12-slim"
     entrypoint: "bash"
     args:
@@ -16,7 +18,9 @@ steps:
         pip install --no-cache-dir -r requirements.txt
         pytest -q
 
-  # CI - build imagem web
+  # ======================
+  # CI – Build da imagem
+  # ======================
   - name: "gcr.io/cloud-builders/docker"
     args:
       [
@@ -26,7 +30,9 @@ steps:
         "."
       ]
 
-  # CI - push
+  # ======================
+  # CI – Push da imagem
+  # ======================
   - name: "gcr.io/cloud-builders/docker"
     args:
       [
@@ -34,7 +40,9 @@ steps:
         "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
       ]
 
-  # CD - deploy no GKE + secrets
+  # ======================
+  # CD – Deploy no GKE
+  # ======================
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "bash"
     args:
@@ -42,34 +50,37 @@ steps:
       - |
         set -euo pipefail
 
-        gcloud container clusters get-credentials ${_CLUSTER_NAME} --region ${_REGION} --project $PROJECT_ID
+        # Acessa o cluster
+        gcloud container clusters get-credentials ${_CLUSTER_NAME} \
+          --region ${_REGION} \
+          --project $PROJECT_ID
 
-        # Namespace e recursos base
+        # Namespace
         kubectl apply -f k8s/01-namespace.yaml
 
-        # Lê credenciais do Secret Manager
+        # Lê secrets do Secret Manager (runtime)
         DB_USER="$(gcloud secrets versions access latest --secret=db-user)"
         DB_PASSWORD="$(gcloud secrets versions access latest --secret=db-password)"
         DB_NAME="$(gcloud secrets versions access latest --secret=db-name)"
 
-        # (re)cria o Secret no Kubernetes (namespace aplicacao)
+        # Cria/atualiza Secret no Kubernetes
         kubectl -n aplicacao delete secret db-credentials --ignore-not-found
         kubectl -n aplicacao create secret generic db-credentials \
           --from-literal=DB_USER="$DB_USER" \
           --from-literal=DB_PASSWORD="$DB_PASSWORD" \
           --from-literal=DB_NAME="$DB_NAME"
 
-        # Banco + serviços
+        # Aplica manifests
         kubectl apply -f k8s/03-pvc-mariadb.yaml
-        kubectl apply -f k8s/05-svc-mariadb.yaml
         kubectl apply -f k8s/04-deploy-mariadb.yaml
+        kubectl apply -f k8s/05-svc-mariadb.yaml
 
-        # Web + serviço externo
-        kubectl apply -f k8s/07-svc-web.yaml
         kubectl apply -f k8s/06-deploy-web.yaml
+        kubectl apply -f k8s/07-svc-web.yaml
 
-        # Atualiza imagem do deployment web para o commit atual
-        kubectl -n aplicacao set image deployment/web web=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA
+        # Atualiza imagem da aplicação
+        kubectl -n aplicacao set image deployment/web \
+          web=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA
 
         # Aguarda rollouts
         kubectl -n aplicacao rollout status deployment/mariadb --timeout=300s
@@ -77,3 +88,4 @@ steps:
 
 images:
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
+
