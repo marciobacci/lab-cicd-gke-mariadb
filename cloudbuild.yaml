@@ -15,16 +15,19 @@ steps:
     args:
       - "-c"
       - |
+        set -e
         pip install --no-cache-dir -r requirements.txt
         pytest -q
 
   # ======================
-  # CI – Build da imagem
+  # CI – Build da imagem (Dockerfile na raiz)
   # ======================
   - name: "gcr.io/cloud-builders/docker"
     args:
       [
         "build",
+        "-f",
+        "Dockerfile",
         "-t",
         "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA",
         "."
@@ -41,7 +44,7 @@ steps:
       ]
 
   # ======================
-  # CD – Deploy no GKE
+  # CD – Deploy no GKE (GKE + Secret Manager -> Secret do Kubernetes)
   # ======================
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "bash"
@@ -51,36 +54,37 @@ steps:
         set -euo pipefail
 
         # Acessa o cluster
-        gcloud container clusters get-credentials ${_CLUSTER_NAME} \
-          --region ${_REGION} \
-          --project $$PROJECT_ID
+        gcloud container clusters get-credentials "${_CLUSTER_NAME}" \
+          --region "${_REGION}" \
+          --project "$PROJECT_ID"
 
         # Namespace
-        kubectl apply -f k8s/01-namespace.yaml
+        kubectl apply -f k8s/namespace.yaml
 
         # Lê secrets do Secret Manager (runtime)
         DB_USER="$(gcloud secrets versions access latest --secret=db-user)"
         DB_PASSWORD="$(gcloud secrets versions access latest --secret=db-password)"
         DB_NAME="$(gcloud secrets versions access latest --secret=db-name)"
 
-        # Cria/atualiza Secret no Kubernetes
+        # Cria/atualiza Secret no Kubernetes (note o $$ para NÃO virar substitution do Cloud Build)
         kubectl -n aplicacao delete secret db-credentials --ignore-not-found
         kubectl -n aplicacao create secret generic db-credentials \
           --from-literal=DB_USER="$$DB_USER" \
           --from-literal=DB_PASSWORD="$$DB_PASSWORD" \
           --from-literal=DB_NAME="$$DB_NAME"
 
-        # Aplica manifests
-        kubectl apply -f k8s/03-pvc-mariadb.yaml
-        kubectl apply -f k8s/04-deploy-mariadb.yaml
-        kubectl apply -f k8s/05-svc-mariadb.yaml
+        # Aplica manifests do MariaDB
+        kubectl apply -f k8s/pvc-mariadb.yaml
+        kubectl apply -f k8s/deploy-mariadb.yaml
+        kubectl apply -f k8s/svc-mariadb.yaml
 
-        kubectl apply -f k8s/06-deploy-web.yaml
-        kubectl apply -f k8s/07-svc-web.yaml
+        # Aplica manifests da Web
+        kubectl apply -f k8s/deploy-web.yaml
+        kubectl apply -f k8s/svc-web.yaml
 
-        # Atualiza imagem da aplicação
+        # Atualiza imagem da aplicação para o commit atual
         kubectl -n aplicacao set image deployment/web \
-          web=${_REGION}-docker.pkg.dev/$$PROJECT_ID/${_REPO}/web:$SHORT_SHA
+          web="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
 
         # Aguarda rollouts
         kubectl -n aplicacao rollout status deployment/mariadb --timeout=300s
@@ -88,5 +92,3 @@ steps:
 
 images:
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
-
-
