@@ -80,7 +80,7 @@ steps:
 
         # Atualiza imagem da aplicação
         kubectl -n aplicacao set image deployment/web \
-          web=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA
+          web=${_REGION}-docker.pkg.dev/$$PROJECT_ID/${_REPO}/web:$SHORT_SHA
 
         # Aguarda rollouts
         kubectl -n aplicacao rollout status deployment/mariadb --timeout=300s
@@ -88,4 +88,5 @@ steps:
 
 images:
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
+
 
