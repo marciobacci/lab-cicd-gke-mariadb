@@ -20,7 +20,22 @@ steps:
         pytest -q
 
   # ======================
-  # CI – Build da imagem (Dockerfile na raiz)
+  # Diagnóstico – conferir arquivos no /workspace
+  # ======================
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        echo "PWD=$(pwd)"
+        echo "Listando /workspace:"
+        ls -la
+        echo "Procurando Dockerfile:"
+        find . -maxdepth 2 -type f -iname 'dockerfile*' -print
+
+  # ======================
+  # CI – Build da imagem (forçando -f Dockerfile)
   # ======================
   - name: "gcr.io/cloud-builders/docker"
     args:
@@ -44,7 +59,7 @@ steps:
       ]
 
   # ======================
-  # CD – Deploy no GKE (GKE + Secret Manager -> Secret do Kubernetes)
+  # CD – Deploy no GKE
   # ======================
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "bash"
@@ -66,23 +81,22 @@ steps:
         DB_PASSWORD="$(gcloud secrets versions access latest --secret=db-password)"
         DB_NAME="$(gcloud secrets versions access latest --secret=db-name)"
 
-        # Cria/atualiza Secret no Kubernetes (note o $$ para NÃO virar substitution do Cloud Build)
+        # Cria/atualiza Secret no Kubernetes
         kubectl -n aplicacao delete secret db-credentials --ignore-not-found
         kubectl -n aplicacao create secret generic db-credentials \
           --from-literal=DB_USER="$$DB_USER" \
           --from-literal=DB_PASSWORD="$$DB_PASSWORD" \
           --from-literal=DB_NAME="$$DB_NAME"
 
-        # Aplica manifests do MariaDB
+        # Aplica manifests (ajuste para os nomes reais do seu repo)
         kubectl apply -f k8s/pvc-mariadb.yaml
         kubectl apply -f k8s/deploy-mariadb.yaml
         kubectl apply -f k8s/svc-mariadb.yaml
 
-        # Aplica manifests da Web
         kubectl apply -f k8s/deploy-web.yaml
         kubectl apply -f k8s/svc-web.yaml
 
-        # Atualiza imagem da aplicação para o commit atual
+        # Atualiza imagem da aplicação
         kubectl -n aplicacao set image deployment/web \
           web="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$SHORT_SHA"
 
