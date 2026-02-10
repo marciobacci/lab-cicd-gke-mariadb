@@ -53,7 +53,7 @@ steps:
         # Acessa o cluster
         gcloud container clusters get-credentials ${_CLUSTER_NAME} \
           --region ${_REGION} \
-          --project $PROJECT_ID
+          --project $$PROJECT_ID
 
         # Namespace
         kubectl apply -f k8s/01-namespace.yaml
@@ -66,9 +66,9 @@ steps:
         # Cria/atualiza Secret no Kubernetes
         kubectl -n aplicacao delete secret db-credentials --ignore-not-found
         kubectl -n aplicacao create secret generic db-credentials \
-          --from-literal=DB_USER="$DB_USER" \
-          --from-literal=DB_PASSWORD="$DB_PASSWORD" \
-          --from-literal=DB_NAME="$DB_NAME"
+          --from-literal=DB_USER="$$DB_USER" \
+          --from-literal=DB_PASSWORD="$$DB_PASSWORD" \
+          --from-literal=DB_NAME="$$DB_NAME"
 
         # Aplica manifests
         kubectl apply -f k8s/03-pvc-mariadb.yaml
